@@ -29,7 +29,7 @@ exchange = ccxt.bybit({
     "proxies": {"http": PROXY, "https": PROXY} if PROXY else None
 })
 
-TIMEFRAME = "2h"
+TIMEFRAME = "2m"
 BASE_TP = 0.025
 BASE_SL = 0.015
 MAX_SLOTS = 4
