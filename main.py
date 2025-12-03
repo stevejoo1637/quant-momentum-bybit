@@ -1,10 +1,12 @@
 # ==========================================
-# Quant Momentum v3.2R - 1min Stable Debug Edition
+# Quant Momentum v3.2R (Starter Safe Edition)
+# For Render Worker - 1m Auto Trading Stable
 # ==========================================
 
-import os, time, random, pandas as pd, ccxt
+import os, time, random, ccxt, pandas as pd
 from datetime import datetime
 
+# ---- API 연결 ----
 API_KEY = os.getenv("BYBIT_API_KEY")
 API_SECRET = os.getenv("BYBIT_API_SECRET")
 
@@ -12,29 +14,18 @@ exchange = ccxt.bybit({
     "apiKey": API_KEY,
     "secret": API_SECRET,
     "enableRateLimit": True,
-    "rateLimit": 2000,            # 최소 2초 간격 요청
-    "timeout": 10000,             # 10초 후 타임아웃
-    "urls": {"api": "https://api.bybitglobal.com"},
+    "rateLimit": 2000,
+    "timeout": 10000,
     "options": {"defaultType": "linear"}
 })
 
+# ---- 설정 ----
 TIMEFRAME = "1m"
 BASE_TP, BASE_SL = 0.025, 0.015
+SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
 MAX_SLOTS = 4
-SYMBOLS = ["BTC/USDT","ETH/USDT","SOL/USDT"]
-LOG_FILE = "tradelog_v3.2R_live.csv"
 
-def safe_fetch(func, *args, retries=3, wait=(2,5)):
-    for i in range(retries):
-        try:
-            print(f"🕒 API call {i+1}/{retries} → {func.__name__}")
-            return func(*args)
-        except Exception as e:
-            print(f"⚠️ API Error ({i+1}/{retries}): {e}")
-            time.sleep(random.randint(*wait))
-    print(f"❌ {func.__name__} failed after {retries} retries")
-    return None
-
+# ---- 보조 지표 ----
 def ta_rsi(close, n=14):
     delta = close.diff()
     gain, loss = delta.clip(lower=0), -delta.clip(upper=0)
@@ -57,70 +48,65 @@ def ta_atr(high, low, close, n=14):
     ], axis=1).max(axis=1)
     return tr.rolling(n).mean()
 
+# ---- 안정적 API 요청 ----
+def safe_fetch(func, *args, retries=3, wait=(3,6)):
+    for i in range(retries):
+        try:
+            return func(*args)
+        except Exception as e:
+            print(f"⚠️ [{func.__name__}] Error ({i+1}/{retries}): {e}")
+            time.sleep(random.randint(*wait))
+    print(f"❌ [{func.__name__}] failed after {retries} retries.")
+    return None
+
+# ---- OHLCV 가져오기 ----
 def get_ohlcv(symbol):
-    print(f"📊 Fetching OHLCV for {symbol} ({TIMEFRAME})")
     data = safe_fetch(exchange.fetch_ohlcv, symbol, TIMEFRAME, 200)
-    if not data: return None
+    if not data: 
+        print(f"⚠️ {symbol} OHLCV 불러오기 실패.")
+        return None
     df = pd.DataFrame(data, columns=["ts","open","high","low","close","volume"])
     df["rsi"] = ta_rsi(df["close"])
     df["macd"], df["macd_signal"] = ta_macd(df["close"])
     df["atr20"] = ta_atr(df["high"], df["low"], df["close"], 20)
-    df["candle_score"] = ((df["close"] - df["open"]) /
+    df["candle_score"] = ((df["close"] - df["open"]) / 
                           (df["high"] - df["low"] + 1e-9)) * 10
     return df.dropna()
 
+# ---- 신호 판단 ----
 def get_signal(df):
     last, prev = df.iloc[-1], df.iloc[-2]
     long_cond  = (last["rsi"] < 40) and (prev["macd"] < prev["macd_signal"]) \
                  and (last["macd"] > last["macd_signal"]) and (last["candle_score"] >= 5)
     short_cond = (last["rsi"] > 60) and (prev["macd"] > prev["macd_signal"]) \
                  and (last["macd"] < last["macd_signal"]) and (last["candle_score"] <= -5)
-    if long_cond: return "long"
-    if short_cond: return "short"
+    if long_cond: return "LONG"
+    if short_cond: return "SHORT"
     return None
 
-def execute_trade(symbol, signal):
-    try:
-        balance = safe_fetch(exchange.fetch_balance)
-        usdt = balance["total"]["USDT"]
-        price = safe_fetch(exchange.fetch_ticker, symbol)["last"]
-        size = usdt / 4 / price
-        side = "buy" if signal == "long" else "sell"
-        tp = price * (1 + BASE_TP) if signal == "long" else price * (1 - BASE_TP)
-        sl = price * (1 - BASE_SL) if signal == "long" else price * (1 + BASE_SL)
-
-        print(f"📈 {signal.upper()} {symbol} | Entry {price:.2f} | TP {tp:.2f} | SL {sl:.2f}")
-        safe_fetch(exchange.create_market_order, symbol, side, size)
-        log_trade(signal, symbol, price, tp, sl)
-    except Exception as e:
-        print(f"💥 Trade error on {symbol}: {e}")
-
-def log_trade(side, symbol, price, tp, sl):
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    entry = pd.DataFrame([{"time": now, "side": side, "symbol": symbol,
-                           "entry": price, "tp": tp, "sl": sl}])
-    entry.to_csv(LOG_FILE, mode="a", header=not os.path.exists(LOG_FILE), index=False)
-    print(f"🧾 Logged {side} {symbol} @ {price:.2f}")
-
-# ---- 메인 루프 (1분봉용, 60초 주기) ----
+# ---- 메인 루프 ----
 loop = 0
 while True:
     loop += 1
-    print(f"\n[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] 🔄 Loop #{loop}")
+    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n💓 Bot Alive | UTC {now} | Loop #{loop}")
+
     try:
-        for s in SYMBOLS:
-            df = get_ohlcv(s)
-            if df is None:
-                print(f"⚠️ No data for {s}")
+        for sym in SYMBOLS:
+            df = get_ohlcv(sym)
+            if df is None: 
                 continue
             signal = get_signal(df)
+            rsi = df["rsi"].iloc[-1]
+            macd = df["macd"].iloc[-1]
             if signal:
-                execute_trade(s, signal)
+                print(f"📈 {sym} → {signal} 신호 발생! (RSI={rsi:.1f}, MACD={macd:.4f})")
             else:
-                rsi, macd = df["rsi"].iloc[-1], df["macd"].iloc[-1]
-                print(f"⚪ No signal: {s} (RSI={rsi:.1f}, MACD={macd:.4f})")
+                print(f"⚪ {sym}: No signal (RSI={rsi:.1f}, MACD={macd:.4f})")
+        
         print("✅ Cycle complete. Sleeping 60s...\n")
         time.sleep(60)
+
     except Exception as e:
-        print(f"⚠️ Main loop error: {e}")
-        time.sleep(15)
+        print(f"💥 Main loop error: {e}")
+        time.sleep(10)
