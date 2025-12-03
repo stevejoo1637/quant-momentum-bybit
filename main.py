@@ -1,12 +1,17 @@
 # ==========================================
-# Quant Momentum v3.2R (Starter Safe Edition)
-# For Render Worker - 1m Auto Trading Stable
+# Quant Momentum v3.2R - Starter Stable Edition
+# ------------------------------------------
+# Render Starter (1m, continuous running)
 # ==========================================
 
-import os, time, random, ccxt, pandas as pd
+import os
+import time
+import random
+import ccxt
+import pandas as pd
 from datetime import datetime
 
-# ---- API 연결 ----
+# ---- Bybit API ----
 API_KEY = os.getenv("BYBIT_API_KEY")
 API_SECRET = os.getenv("BYBIT_API_SECRET")
 
@@ -14,18 +19,19 @@ exchange = ccxt.bybit({
     "apiKey": API_KEY,
     "secret": API_SECRET,
     "enableRateLimit": True,
-    "rateLimit": 2000,
     "timeout": 10000,
-    "options": {"defaultType": "linear"}
+    "rateLimit": 2000,
+    "options": {"defaultType": "linear"},
+    "urls": {"api": "https://api.bybitglobal.com"}   # ✅ 문법 오류 수정됨
 })
 
-# ---- 설정 ----
+# ---- Settings ----
 TIMEFRAME = "1m"
-BASE_TP, BASE_SL = 0.025, 0.015
+BASE_TP = 0.025
+BASE_SL = 0.015
 SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-MAX_SLOTS = 4
 
-# ---- 보조 지표 ----
+# ---- Helper Functions ----
 def ta_rsi(close, n=14):
     delta = close.diff()
     gain, loss = delta.clip(lower=0), -delta.clip(upper=0)
@@ -48,22 +54,22 @@ def ta_atr(high, low, close, n=14):
     ], axis=1).max(axis=1)
     return tr.rolling(n).mean()
 
-# ---- 안정적 API 요청 ----
-def safe_fetch(func, *args, retries=3, wait=(3,6)):
+def safe_fetch(func, *args, retries=3, wait=(2,5)):
+    """안정적 API 호출 - 오류시 자동 재시도"""
     for i in range(retries):
         try:
             return func(*args)
         except Exception as e:
-            print(f"⚠️ [{func.__name__}] Error ({i+1}/{retries}): {e}")
+            print(f"⚠️ [{func.__name__}] 실패 ({i+1}/{retries}) - {e}")
             time.sleep(random.randint(*wait))
-    print(f"❌ [{func.__name__}] failed after {retries} retries.")
+    print(f"❌ [{func.__name__}] 3회 재시도 실패")
     return None
 
-# ---- OHLCV 가져오기 ----
+# ---- Data Fetch ----
 def get_ohlcv(symbol):
     data = safe_fetch(exchange.fetch_ohlcv, symbol, TIMEFRAME, 200)
-    if not data: 
-        print(f"⚠️ {symbol} OHLCV 불러오기 실패.")
+    if not data:
+        print(f"⚠️ {symbol} 데이터 없음")
         return None
     df = pd.DataFrame(data, columns=["ts","open","high","low","close","volume"])
     df["rsi"] = ta_rsi(df["close"])
@@ -73,8 +79,8 @@ def get_ohlcv(symbol):
                           (df["high"] - df["low"] + 1e-9)) * 10
     return df.dropna()
 
-# ---- 신호 판단 ----
 def get_signal(df):
+    """진입 신호 탐지"""
     last, prev = df.iloc[-1], df.iloc[-2]
     long_cond  = (last["rsi"] < 40) and (prev["macd"] < prev["macd_signal"]) \
                  and (last["macd"] > last["macd_signal"]) and (last["candle_score"] >= 5)
@@ -82,14 +88,16 @@ def get_signal(df):
                  and (last["macd"] < last["macd_signal"]) and (last["candle_score"] <= -5)
     if long_cond: return "LONG"
     if short_cond: return "SHORT"
-    return None
+    return "NONE"
 
-# ---- 메인 루프 ----
+# ---- Main Loop ----
 loop = 0
+print(f"🚀 Quant Momentum v3.2R Starter Edition Initialized ({datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')})")
+
 while True:
     loop += 1
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"\n💓 Bot Alive | UTC {now} | Loop #{loop}")
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"\n💓 Alive | UTC {now} | Loop #{loop}")
 
     try:
         for sym in SYMBOLS:
@@ -99,14 +107,14 @@ while True:
             signal = get_signal(df)
             rsi = df["rsi"].iloc[-1]
             macd = df["macd"].iloc[-1]
-            if signal:
-                print(f"📈 {sym} → {signal} 신호 발생! (RSI={rsi:.1f}, MACD={macd:.4f})")
+            if signal != "NONE":
+                print(f"📈 {sym} → {signal} | RSI={rsi:.1f} | MACD={macd:.5f}")
             else:
-                print(f"⚪ {sym}: No signal (RSI={rsi:.1f}, MACD={macd:.4f})")
+                print(f"⚪ {sym} | RSI={rsi:.1f} | MACD={macd:.5f} | No signal")
         
-        print("✅ Cycle complete. Sleeping 60s...\n")
+        print(f"✅ Loop #{loop} complete. Sleeping 60s...\n")
         time.sleep(60)
 
     except Exception as e:
-        print(f"💥 Main loop error: {e}")
-        time.sleep(10)
+        print(f"💥 Main Loop Error: {e}")
+        time.sleep(15)
