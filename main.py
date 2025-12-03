@@ -1,6 +1,6 @@
 # ==========================================
 # Quant Momentum v3.2R (Realistic Edition)
-# Bybit Futures Auto Trading (2H)
+# Bybit Futures Auto Trading (2H, Full Auto)
 # ==========================================
 
 import os
@@ -10,15 +10,9 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 
-# ==============================
-# 환경변수 (Render / VPS용)
-# ==============================
 API_KEY = os.getenv("BYBIT_API_KEY")
 API_SECRET = os.getenv("BYBIT_API_SECRET")
 
-# ==============================
-# 거래소 객체 생성
-# ==============================
 exchange = ccxt.bybit({
     "apiKey": API_KEY,
     "secret": API_SECRET,
@@ -26,12 +20,7 @@ exchange = ccxt.bybit({
     "options": {"defaultType": "linear"}  # USDT Perpetual
 })
 
-# ==============================
-# 파라미터 설정
-# ==============================
 TIMEFRAME = "2h"
-SLIPPAGE = 0.0025
-FEE = 0.001
 STOP_LOSS = 0.015
 TAKE_PROFIT1 = 0.025
 LEVERAGE = 1
@@ -42,9 +31,9 @@ SYMBOLS = [
     "DOGE/USDT", "ADA/USDT", "AVAX/USDT", "DOT/USDT", "LINK/USDT"
 ]
 
-# ==============================
+# ──────────────────────────────────────────
 # 보조 함수
-# ==============================
+# ──────────────────────────────────────────
 def get_ohlcv(symbol):
     ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=200)
     df = pd.DataFrame(ohlcv, columns=["ts", "open", "high", "low", "close", "volume"])
@@ -77,9 +66,9 @@ def ta_atr(high, low, close, period=14):
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     return tr.rolling(period).mean()
 
-# ==============================
-# 진입 신호 판단
-# ==============================
+# ──────────────────────────────────────────
+# 신호 판정
+# ──────────────────────────────────────────
 def get_signal(df):
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -91,12 +80,8 @@ def get_signal(df):
         return "long"
     elif short_cond:
         return "short"
-    else:
-        return None
+    return None
 
-# ==============================
-# 포지션 상태 확인
-# ==============================
 def get_position(symbol):
     positions = exchange.fetch_positions([symbol])
     for p in positions:
@@ -104,9 +89,9 @@ def get_position(symbol):
             return p["side"].lower()
     return "none"
 
-# ==============================
-# 주문 실행
-# ==============================
+# ──────────────────────────────────────────
+# 완전 자동 주문 (TP/SL 포함)
+# ──────────────────────────────────────────
 def execute_trade(symbol, signal):
     pos = get_position(symbol)
     balance = exchange.fetch_balance()
@@ -115,25 +100,29 @@ def execute_trade(symbol, signal):
     size = (usdt / 4 / price)  # 슬롯당 25%
 
     if signal == "long" and pos != "long":
-        if pos == "short":
-            exchange.create_market_buy_order(symbol, size)
-        exchange.create_market_buy_order(symbol, size)
-        print(f"📈 Long Entry: {symbol}")
+        tp = price * (1 + TAKE_PROFIT1)
+        sl = price * (1 - STOP_LOSS)
+        order = exchange.create_market_buy_order(symbol, size, params={
+            "takeProfitPrice": tp,
+            "stopLossPrice": sl
+        })
+        print(f"📈 LONG {symbol} | Entry: {price:.2f} | TP: {tp:.2f} | SL: {sl:.2f}")
 
     elif signal == "short" and pos != "short":
-        if pos == "long":
-            exchange.create_market_sell_order(symbol, size)
-        exchange.create_market_sell_order(symbol, size)
-        print(f"📉 Short Entry: {symbol}")
-    else:
-        print(f"⏸️ Holding: {symbol}")
+        tp = price * (1 - TAKE_PROFIT1)
+        sl = price * (1 + STOP_LOSS)
+        order = exchange.create_market_sell_order(symbol, size, params={
+            "takeProfitPrice": tp,
+            "stopLossPrice": sl
+        })
+        print(f"📉 SHORT {symbol} | Entry: {price:.2f} | TP: {tp:.2f} | SL: {sl:.2f}")
 
-# ==============================
-# 메인 루프
-# ==============================
+# ──────────────────────────────────────────
+# 메인 루프 (2시간마다 실행)
+# ──────────────────────────────────────────
 while True:
     try:
-        print(f"\n=== {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC | Quant Momentum v3.2R ===")
+        print(f"\n[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Quant Momentum v3.2R running...")
         open_slots = 0
 
         for symbol in SYMBOLS:
@@ -145,7 +134,7 @@ while True:
                 if open_slots >= MAX_SLOTS:
                     break
 
-        print("✅ Cycle complete. Sleeping for 2 hours...\n")
+        print("✅ Cycle complete. Sleeping for 2h...\n")
         time.sleep(60 * 60 * 2)
 
     except Exception as e:
