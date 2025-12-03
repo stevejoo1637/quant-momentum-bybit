@@ -194,3 +194,6 @@ while True:
         print(f"⚠️ Critical error: {e}")
         print("🕒 90초 후 재시작 시도...")
         time.sleep(90)
+        "urls": {"api": "https://api.bybitglobal.com"},
+"timeout": 10000,  # ⏱ 10초 타임아웃
+
