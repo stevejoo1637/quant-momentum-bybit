@@ -23,9 +23,16 @@ exchange = ccxt.bybit({
     "timeout": 15000,
     "rateLimit": 2000,
     "options": {"defaultType": "linear"},
+    "urls": {
+        "api": {
+            "public": "https://api.bybit.com",
+            "private": "https://api.bybit.com"
+        }
+    }
 })
 
 print("💰 MAINNET 실거래 모드 활성화!")
+print(f"🔗 API URL: https://api.bybit.com")
 
 # ---- 기본 설정 ----
 TIMEFRAME = "1m"
