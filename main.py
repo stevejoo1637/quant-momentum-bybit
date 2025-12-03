@@ -2,90 +2,105 @@ import ccxt
 import pandas as pd
 import numpy as np
 import time
-import ta
 import requests
+import ta
 import os
+import hmac
+import hashlib
+import time as t
 
-# ===== API 키 불러오기 =====
+# ===== 환경 변수 =====
 API_KEY = os.getenv("BYBIT_API_KEY")
-API_SECRET = os.getenv("BYBIT_API_SECRET")
+API_SECRET = os.getenv("BYBIT_SECRET_KEY")
 
-# ===== 거래 설정 =====
-symbol = "BTC/USDT"
-timeframe = "2h"
-leverage = 1
-allocation = 0.25  # 전체 자산의 25%만 사용
+# ===== Bybit 선물용 설정 =====
+symbol = "BTCUSDT"  # Unified Account에서는 :USDT 필요 없음
+timeframe = "15m"
+amount = 0.001
+leverage = 5
+
 exchange = ccxt.bybit({
     "apiKey": API_KEY,
     "secret": API_SECRET,
-    "enableRateLimit": True,
-    "options": {"defaultType": "future"}
+    "options": {
+        "defaultType": "linear"
+    }
 })
-exchange.set_leverage(leverage, symbol)
 
-# ===== RSI, MACD, ATR 계산 =====
-def get_indicators(df):
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    macd = ta.trend.MACD(df["close"])
-    df["macd"] = macd.macd()
-    df["signal"] = macd.macd_signal()
-    df["atr"] = ta.volatility.AverageTrueRange(df["high"], df["low"], df["close"], window=20).average_true_range()
-    return df
+# ===== 레버리지 설정 (REST API 직접 호출) =====
+def set_leverage(symbol, leverage):
+    url = "https://api.bybit.com/v5/position/set-leverage"
+    ts = int(t.time() * 1000)
+    body = {
+        "category": "linear",
+        "symbol": symbol,
+        "buyLeverage": str(leverage),
+        "sellLeverage": str(leverage)
+    }
 
-# ===== 시세 데이터 불러오기 =====
-def fetch_ohlcv():
-    bars = exchange.fetch_ohlcv(symbol, timeframe, limit=200)
-    df = pd.DataFrame(bars, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    return get_indicators(df)
+    param_str = f"api_key={API_KEY}&buyLeverage={leverage}&category=linear&recv_window=5000&sellLeverage={leverage}&symbol={symbol}&timestamp={ts}"
+    signature = hmac.new(
+        bytes(API_SECRET, "utf-8"),
+        bytes(param_str, "utf-8"),
+        hashlib.sha256
+    ).hexdigest()
 
-# ===== 포지션 확인 =====
-def get_position():
-    balance = exchange.fetch_balance(params={"type": "future"})
-    pos = balance["info"]["result"]
-    for p in pos:
-        if p["data"]["symbol"] == "BTCUSDT":
-            return p
-    return None
+    headers = {
+        "Content-Type": "application/json",
+        "X-BAPI-API-KEY": API_KEY,
+        "X-BAPI-SIGN": signature,
+        "X-BAPI-TIMESTAMP": str(ts),
+        "X-BAPI-RECV-WINDOW": "5000"
+    }
 
-# ===== 매수 / 매도 =====
-def place_order(side, size):
-    print(f"💥 {side.upper()} {size} BTC/USDT")
-    order = exchange.create_market_order(symbol, side, size)
-    print(order)
-    return order
+    try:
+        res = requests.post(url, json=body, headers=headers)
+        print("✅ Leverage Set Response:", res.json())
+    except Exception as e:
+        print("⚠️ Leverage setup error:", e)
 
-# ===== 메인 전략 =====
-def strategy():
-    df = fetch_ohlcv()
-    rsi = df["rsi"].iloc[-1]
-    macd = df["macd"].iloc[-1]
-    signal = df["signal"].iloc[-1]
+set_leverage(symbol, leverage)
 
-    balance = exchange.fetch_balance()
-    usdt = balance["total"]["USDT"]
-    price = df["close"].iloc[-1]
-    size = (usdt * allocation) / price
-
-    pos = get_position()
-
-    # 진입 조건
-    if rsi < 40 and macd > signal:
-        if pos is None or pos["data"]["side"] != "Buy":
-            place_order("buy", size)
-    elif rsi > 60 and macd < signal:
-        if pos is None or pos["data"]["side"] != "Sell":
-            place_order("sell", size)
+# ===== 전략 (단순 이동평균 교차) =====
+def get_signal():
+    bars = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
+    df = pd.DataFrame(bars, columns=["time", "open", "high", "low", "close", "volume"])
+    df["MA5"] = df["close"].rolling(5).mean()
+    df["MA20"] = df["close"].rolling(20).mean()
+    if df["MA5"].iloc[-1] > df["MA20"].iloc[-1]:
+        return "buy"
+    elif df["MA5"].iloc[-1] < df["MA20"].iloc[-1]:
+        return "sell"
     else:
-        print("⚖️ No clear signal")
+        return None
 
-# ===== 루프 실행 =====
-print("🚀 Quant Momentum Bot Started")
+def close_all_positions():
+    try:
+        positions = exchange.fetch_positions([symbol])
+        for p in positions:
+            if float(p["contracts"]) > 0:
+                side = "sell" if p["side"] == "long" else "buy"
+                exchange.create_market_order(symbol, side, abs(float(p["contracts"])))
+                print(f"🚪 Closed {p['side']} position")
+    except Exception as e:
+        print("⚠️ Close positions error:", e)
+
+print("🤖 Bybit Unified Account Futures Bot Started!")
+
 while True:
     try:
-        strategy()
-        print("⏳ Waiting for next candle...\n")
-        time.sleep(60 * 60 * 2)  # 2시간마다 실행
+        signal = get_signal()
+        if signal == "buy":
+            close_all_positions()
+            order = exchange.create_market_order(symbol, "buy", amount)
+            print(f"✅ Long opened! {order['id']}")
+        elif signal == "sell":
+            close_all_positions()
+            order = exchange.create_market_order(symbol, "sell", amount)
+            print(f"✅ Short opened! {order['id']}")
+        else:
+            print("⏳ Waiting...")
+
     except Exception as e:
-        print("❌ Error:", e)
-        time.sleep(60)
+        print("⚠️ Error:", e)
+    time.sleep(60)
