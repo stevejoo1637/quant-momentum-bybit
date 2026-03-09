@@ -2,7 +2,7 @@
 """
 Bybit 일봉 데이터 다운로드
 - 선물(linear) 거래대금 상위 종목 자동 선별
-- 2년치 일봉 OHLCV 저장
+- 4년치 일봉 OHLCV 저장
 """
 
 import os
@@ -18,7 +18,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 BASE_URL = "https://api.bybit.com"
 EXCLUDE = {"BTCUSDT", "ETHUSDT"}
 TOP_N = 80  # 넉넉하게 다운로드
-DAYS = 730  # 2년
+DAYS = 1460  # 4년
 
 
 def get_tickers():
