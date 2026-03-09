@@ -1,0 +1,24 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            cd /root/quant-momentum-bybit || git clone https://github.com/stevejoo1637/quant-momentum-bybit.git /root/quant-momentum-bybit
+            cd /root/quant-momentum-bybit
+            git pull origin main
+            pip install -r requirements.txt
+            echo "✅ 배포 완료: $(date)"
