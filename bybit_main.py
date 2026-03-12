@@ -1097,8 +1097,7 @@ def main():
     for sk, cfg in STRATS.items():
         log.info(f"  {sk}: {cfg['name']} SL={cfg['sl']*100:.0f}% TP={cfg['tp']*100:.0f}% {cfg['hold_days']}일")
 
-    # 시작 시 한 번 실행
-    daily_check()
+    # 시작 시 상태만 출력 (daily_check는 00:05 UTC에만 실행)
     print_status()
 
     # 스케줄 등록 (UTC) — 하루 1회
