@@ -136,8 +136,10 @@ def load_state() -> dict:
 
 
 def save_state(s: dict):
-    with open(STATE_F, "w", encoding="utf-8") as f:
+    tmp = STATE_F + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(s, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, STATE_F)
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -159,7 +161,7 @@ def round_qty(qty: float, step: float) -> str:
     """수량을 step 단위로 내림"""
     if step <= 0:
         return str(qty)
-    precision = max(0, -int(math.floor(math.log10(step))))
+    precision = max(0, min(8, -int(math.floor(math.log10(step)))))
     rounded = math.floor(qty / step) * step
     return f"{rounded:.{precision}f}"
 
@@ -281,7 +283,7 @@ def update_universe(state: dict) -> list[str]:
                     if earliest <= start_ms:
                         break
                     fetch_end = earliest - 1
-                    time.sleep(0.03)
+                    time.sleep(0.12)
 
                 tv_sum = 0.0
                 tv_count = 0
@@ -298,7 +300,7 @@ def update_universe(state: dict) -> list[str]:
                 pass
             if (i + 1) % 50 == 0:
                 log.info(f"  ... {i+1}/{len(candidates)}")
-            time.sleep(0.05)
+            time.sleep(0.15)
 
         # 평균 거래대금 상위 TOP_N
         ranked = sorted(avg_turnover.items(), key=lambda x: -x[1])
