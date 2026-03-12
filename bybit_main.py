@@ -28,6 +28,7 @@ import requests
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone, timedelta
+import db_logger
 
 from bybit_api import BybitAPI
 
@@ -386,6 +387,17 @@ def close_pos(symbol: str, state: dict, reason: str):
         f"${entry:.4f} → ${cur_price:.4f}\n"
         f"수익: <b>{pnl:+.1f}%</b> ({held}일)"
     )
+    # DB 로깅
+    try:
+        db_logger.log_trade(
+            symbol=symbol, side=side, entry_price=entry, exit_price=cur_price,
+            qty=float(qty), pnl=pnl, pnl_pct=pnl,
+            strategy=sk, reason=reason, hold_days=held
+        )
+        db_logger.remove_position(symbol)
+    except Exception as e:
+        log.warning(f"DB 로깅 실패: {e}")
+
     del state["positions"][symbol]
 
 
