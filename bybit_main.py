@@ -639,6 +639,14 @@ def daily_check():
                 "side": side,
             }
             entered.add(sym)
+            try:
+                db_logger.upsert_position(
+                    symbol=sym, side=side, entry_price=cur_price,
+                    qty=float(qty_str), sl_price=sl_price, tp_price=tp_price,
+                    strategy=sk, entry_time=today_str()
+                )
+            except Exception as e:
+                log.warning(f"DB 포지션 기록 실패: {e}")
             log.info(
                 f"진입: {sym} {sk}({cfg['name']}) {direction} "
                 f"qty={qty_str} @ ${cur_price:.4f} "
