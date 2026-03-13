@@ -11,15 +11,10 @@ v1 대비 변경:
 전략:
   A: 상단돌파 롱 (강세, SL-7%/TP+25%/7일, R²>0.5, 볼륨1.5x)
   B: 하단돌파 롱 (무관, SL-5%/TP+15%/14일, R²>0.5, 볼륨1.0x)
-  C: 상단터치 숏 (약세, SL-10%/TP+20%/10일, R²>0.3, 볼륨1.0x)
-
-장중 안전장치 (5분 모니터링):
-  B/C: max_loss -15% (장중 스톱)
-  B: max_profit +30% (장중 TP)
-  A: 장중 제한 없음
+  C: 상단터치 숏 (약세, SL-15%/TP+20%/10일, R²>0.3, 볼륨1.0x)
 
 설정:
-  레버리지: 2x | 슬롯: 4 | 현금비율: 30%
+  레버리지: 2x | 슬롯: 4 | 현금비율: 40%
   시장필터: BTC SMA20 > SMA50
   유니버스: 거래대금 상위 60 (BTC/ETH 제외, 상장 150일 미만 제외)
 
@@ -50,7 +45,7 @@ TESTNET    = os.environ.get("BYBIT_TESTNET", "0") == "1"
 
 LEVERAGE   = 2
 MAX_POS    = 4
-CASH_RATIO = 0.30
+CASH_RATIO = 0.40
 MDD_DEPLOY_THRESH = -0.35  # MDD -35% 도달 시 현금 전량투입
 TOP_N      = 60
 MIN_LIST_DAYS = 150  # 상장 150일 미만 종목 제외
@@ -58,10 +53,6 @@ EXCLUDE    = {"BTCUSDT", "ETHUSDT"}
 
 RESIZE_MIN_DELTA_USDT = 5.0   # $5 미만 리사이즈 차이는 무시
 RESIZE_WAIT_SEC       = 60    # 리사이즈 간 대기 시간 (초)
-
-# 장중 안전장치 (5분 모니터링)
-INTRADAY_MAX_LOSS  = {"A": None, "B": -0.15, "C": -0.15}
-INTRADAY_MAX_PROFIT = {"A": None, "B": 0.30, "C": None}
 
 STRATS = {
     "A": {
@@ -85,7 +76,7 @@ STRATS = {
         "signal": "upper_touch",
         "direction": "short",
         "btc_filter": "bear",
-        "sl": 0.10, "tp": 0.20, "hold_days": 10,
+        "sl": 0.15, "tp": 0.20, "hold_days": 10,
         "r2_thresh": 0.3, "vol_mult": 1.0,
     },
 }
@@ -966,10 +957,9 @@ def send_daily_report(state: dict, is_bull: bool, equity: float):
     tg_send("\n".join(lines))
 
 
-# ── 모니터링 (5분마다) — 장중 안전장치 ────────────────────────────────────────
+# ── 모니터링 (5분마다) ────────────────────────────────────────────────────────
 
 def monitor():
-    """5분마다 장중 max_loss/max_profit 체크 (유저코드 v2)"""
     state = load_state()
     positions = state.get("positions", {})
     if not positions:
@@ -977,7 +967,6 @@ def monitor():
 
     for sym in list(positions.keys()):
         pos = positions[sym]
-        sk = pos["strat"]
         try:
             ticker = api.get_ticker(sym)
             cur_price = float(ticker["lastPrice"])
@@ -985,27 +974,24 @@ def monitor():
             log.error(f"{sym} 모니터 가격 조회 실패: {e}")
             continue
 
-        entry = pos["entry_price"]
         direction = pos["direction"]
-
-        if direction == "short":
-            pnl = -(cur_price / entry - 1)
-        else:
-            pnl = cur_price / entry - 1
+        sl_price = pos["sl_price"]
+        tp_price = pos["tp_price"]
 
         hit = False
-
-        # 장중 max_loss (B/C: -15%)
-        ml = INTRADAY_MAX_LOSS.get(sk)
-        if ml is not None and pnl <= ml:
-            close_pos(sym, state, f"MAXLOSS {pnl*100:+.1f}% (한도{ml*100:.0f}%)")
-            hit = True
-
-        # 장중 max_profit (B: +30%)
-        if not hit:
-            mp = INTRADAY_MAX_PROFIT.get(sk)
-            if mp is not None and pnl >= mp:
-                close_pos(sym, state, f"MAXPROFIT {pnl*100:+.1f}% (한도+{mp*100:.0f}%)")
+        if direction == "long":
+            if cur_price <= sl_price:
+                close_pos(sym, state, f"SL ${cur_price:.4f}<=${sl_price:.4f}")
+                hit = True
+            elif cur_price >= tp_price:
+                close_pos(sym, state, f"TP ${cur_price:.4f}>=${tp_price:.4f}")
+                hit = True
+        else:  # short
+            if cur_price >= sl_price:
+                close_pos(sym, state, f"SL ${cur_price:.4f}>=${sl_price:.4f}")
+                hit = True
+            elif cur_price <= tp_price:
+                close_pos(sym, state, f"TP ${cur_price:.4f}<=${tp_price:.4f}")
                 hit = True
 
         if hit:
@@ -1109,23 +1095,17 @@ def main():
     log.info(f"  테스트넷={'ON' if TESTNET else 'OFF'}")
     log.info(f"  드라이런={'ON' if DRY_RUN else 'OFF'}")
     for sk, cfg in STRATS.items():
-        ml = INTRADAY_MAX_LOSS.get(sk)
-        mp = INTRADAY_MAX_PROFIT.get(sk)
-        ml_s = f"maxloss{ml*100:.0f}%" if ml else "-"
-        mp_s = f"maxprofit+{mp*100:.0f}%" if mp else "-"
-        log.info(f"  {sk}: {cfg['name']} SL={cfg['sl']*100:.0f}% TP={cfg['tp']*100:.0f}% {cfg['hold_days']}일 [{ml_s}/{mp_s}]")
+        log.info(f"  {sk}: {cfg['name']} SL={cfg['sl']*100:.0f}% TP={cfg['tp']*100:.0f}% {cfg['hold_days']}일")
 
     # 시작 시 상태만 출력 (daily_check는 00:05 UTC에만 실행)
     print_status()
 
-    # 스케줄 등록
+    # 스케줄 등록 (UTC) — 하루 1회
     schedule.every().day.at("00:05").do(daily_check)
     schedule.every().day.at("00:10").do(print_status)
-    schedule.every(5).minutes.do(monitor)  # 장중 안전장치
 
     log.info("스케줄:")
     log.info("  00:05 UTC → 일간 체크 (시그널 + 진입/청산 + 리사이즈)")
-    log.info("  5분마다 → 장중 안전장치 (B/C maxloss-15%, B maxprofit+30%)")
 
     while True:
         try:
