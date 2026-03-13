@@ -48,7 +48,7 @@ API_KEY    = os.environ.get("BYBIT_API_KEY", "")
 API_SECRET = os.environ.get("BYBIT_API_SECRET", "")
 TESTNET    = os.environ.get("BYBIT_TESTNET", "0") == "1"
 
-LEVERAGE   = 3
+LEVERAGE   = 2
 MAX_POS    = 4
 CASH_RATIO = 0.30
 MDD_DEPLOY_THRESH = -0.35  # MDD -35% 도달 시 현금 전량투입
@@ -550,7 +550,7 @@ def close_pos(symbol: str, state: dict, reason: str):
 
 def daily_check():
     log.info("=" * 60)
-    log.info("  일간 체크 시작 (v3: 고정25% + 3x)")
+    log.info("  일간 체크 시작 (v2: weight=1/n)")
     log.info("=" * 60)
 
     state = load_state()
@@ -711,14 +711,23 @@ def daily_check():
     log.info(f"시그널 후보: {len(candidates)}개 → 진입 예정: {new_entries_count}개")
 
     # ─────────────────────────────────────────────────────────
-    # 6. 리사이즈 단계 — 고정 25% (리사이즈 불필요)
+    # 6. 리사이즈 단계
     # ─────────────────────────────────────────────────────────
     final_n = n_after_close + new_entries_count
 
+    if final_n > 0 and n_after_close > 0:
+        # 포지션 수 변화가 있으면 리사이즈
+        if closed_count > 0 or new_entries_count > 0:
+            resize_positions(
+                state, instruments, final_n,
+                reason=f"청산{closed_count}/진입{new_entries_count} → 1/{final_n}"
+            )
+
     # ─────────────────────────────────────────────────────────
-    # 7. 신규 진입 (고정 1/4 = 25% 비중)
+    # 7. 신규 진입
     # ─────────────────────────────────────────────────────────
     if new_entries_count > 0:
+        # 최신 자산 조회 (리사이즈 후 변동)
         try:
             equity = api.get_equity()
             log.info(f"총 자산: ${equity:,.2f}")
@@ -728,10 +737,10 @@ def daily_check():
 
         effective_cash_ratio = get_effective_cash_ratio(state, equity)
         invest_capital = equity * (1 - effective_cash_ratio)
-        per_slot = invest_capital / MAX_POS  # 고정 1/4 비중
+        per_slot = invest_capital / final_n  # 1/n 비중
         order_usdt = per_slot * LEVERAGE
 
-        log.info(f"진입 사이징: 고정 1/{MAX_POS} 비중, 슬롯 ${per_slot:,.0f}, 주문 ${order_usdt:,.0f}")
+        log.info(f"진입 사이징: 1/{final_n} 비중, 슬롯 ${per_slot:,.0f}, 주문 ${order_usdt:,.0f}")
 
         for sym, sk, score in selected:
             if len(state["positions"]) >= MAX_POS:
@@ -824,9 +833,10 @@ def daily_check():
                 log.error(f"{sym} 진입 실패: {e}")
 
     # ─────────────────────────────────────────────────────────
-    # 8. 월간 리밸런싱 (고정 25% — 현금비중 복구만)
-    #    - 고정 25%이므로 포지션 리사이즈 불필요
-    #    - 현금비중 복구만 수행 (MDD 투입 상태면 스킵)
+    # 8. 월간 리밸런싱 (유저코드 동일: 월말에 1/n 재조정 + 현금비중 복구)
+    #    - 포지션 변동 없는 달에도 drift 보정
+    #    - MDD 복구 후 현금 40% 복구 역할
+    #    - MDD 투입 상태(mdd_deployed)면 스킵
     # ─────────────────────────────────────────────────────────
     today = now_utc()
     last_rebal = state.get("last_rebal_month", "")
@@ -837,8 +847,9 @@ def daily_check():
             and len(state["positions"]) > 0
             and closed_count == 0 and new_entries_count == 0
             and not mdd_deployed):
-        log.info(f"월간 리밸런싱: {current_month} (고정25%, 리사이즈 없음)")
-        resize_positions(state, instruments, MAX_POS, reason=f"월간리밸런싱({current_month})")
+        log.info(f"월간 리밸런싱: {current_month}")
+        n_current = len(state["positions"])
+        resize_positions(state, instruments, n_current, reason=f"월간리밸런싱({current_month})")
         state["last_rebal_month"] = current_month
         save_state(state)
 
@@ -1113,10 +1124,10 @@ def main():
         sys.exit(1)
 
     log.info("=" * 60)
-    log.info("  바이비트 선물 자동매매 v3 — 채널 돌파 (고정25% + 3x)")
+    log.info("  바이비트 선물 자동매매 v2 — 채널 돌파 (weight=1/n)")
     log.info("=" * 60)
     log.info(f"  레버리지={LEVERAGE}x, 슬롯={MAX_POS}, 현금={CASH_RATIO*100:.0f}%")
-    log.info(f"  포지션 사이징: 고정 1/{MAX_POS} ({100/MAX_POS:.0f}%)")
+    log.info(f"  포지션 사이징: 동적 1/n (최대 {MAX_POS}슬롯)")
     log.info(f"  월간 리밸런싱: ON")
     log.info(f"  테스트넷={'ON' if TESTNET else 'OFF'}")
     log.info(f"  드라이런={'ON' if DRY_RUN else 'OFF'}")
