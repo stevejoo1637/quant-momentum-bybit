@@ -864,6 +864,29 @@ def daily_check():
         equity = 0
     send_daily_report(state, is_bull, equity)
 
+    # DB 일일 성과 기록
+    try:
+        today_trades = [t for t in state.get("trade_log", []) if t.get("date") == today_str()]
+        win_count = sum(1 for t in today_trades if t.get("pnl", 0) > 0)
+        prev_equity = state.get("prev_equity", equity)
+        daily_pnl = equity - prev_equity
+        daily_pnl_pct = (daily_pnl / prev_equity * 100) if prev_equity > 0 else 0
+        btc_state_str = "bull" if is_bull else "bear"
+        try:
+            btc_price = float(api.get_ticker("BTCUSDT")["lastPrice"])
+        except Exception:
+            btc_price = 0
+        db_logger.log_daily(
+            date_str=today_str(), equity=equity, daily_pnl=daily_pnl,
+            daily_pnl_pct=daily_pnl_pct, open_positions=len(state["positions"]),
+            total_trades=len(today_trades), win_trades=win_count,
+            btc_price=btc_price, btc_state=btc_state_str
+        )
+        state["prev_equity"] = equity
+        save_state(state)
+    except Exception as e:
+        log.warning(f"DB 일일성과 기록 실패: {e}")
+
 
 # ── 일간 리포트 ───────────────────────────────────────────────────────────────
 
