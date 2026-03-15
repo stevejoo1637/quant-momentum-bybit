@@ -9,9 +9,9 @@ v1 대비 변경:
   - 리사이즈 간 60초 대기 (안정성)
 
 전략:
-  A: 상단돌파 롱 (강세, SL-7%/TP+25%/7일, R²>0.5, 볼륨1.5x)
-  B: 하단돌파 롱 (무관, SL-5%/TP+15%/14일, R²>0.5, 볼륨1.0x)
-  C: 상단터치 숏 (약세, SL-10%/TP+20%/10일, R²>0.3, 볼륨1.0x)
+  A: 상단돌파 롱 (강세, SL-10%/TP+25%/7일, R²>0.5, 볼륨1.5x)
+  B: 하단돌파 롱 (무관, SL-5%/TP+15%/30일, R²>0.5, 볼륨1.0x)
+  C: 상단터치 숏 (약세, SL-15%/TP+15%/10일, R²>0.3, 볼륨1.0x)
 
 장중 안전장치 (5분 모니터링):
   B/C: max_loss -15% (장중 스톱)
@@ -19,7 +19,7 @@ v1 대비 변경:
   A: 장중 제한 없음
 
 설정:
-  레버리지: 2x | 슬롯: 4 | 현금비율: 30%
+  레버리지: 3x | 슬롯: 4 | 현금비율: 40%
   시장필터: BTC SMA20 > SMA50
   유니버스: 거래대금 상위 60 (BTC/ETH 제외, 상장 150일 미만 제외)
 
@@ -50,8 +50,8 @@ TESTNET    = os.environ.get("BYBIT_TESTNET", "0") == "1"
 
 LEVERAGE   = 3
 MAX_POS    = 4
-CASH_RATIO = 0.30
-MDD_DEPLOY_THRESH = -0.35  # MDD -35% 도달 시 현금 전량투입
+CASH_RATIO = 0.40
+MDD_DEPLOY_THRESH = -0.40  # MDD -40% 도달 시 현금 전량투입
 TOP_N      = 60
 MIN_LIST_DAYS = 150  # 상장 150일 미만 종목 제외
 EXCLUDE    = {"BTCUSDT", "ETHUSDT"}
@@ -69,7 +69,7 @@ STRATS = {
         "signal": "upper_break",
         "direction": "long",
         "btc_filter": "bull",
-        "sl": 0.07, "tp": 0.25, "hold_days": 7,
+        "sl": 0.10, "tp": 0.25, "hold_days": 7,
         "r2_thresh": 0.5, "vol_mult": 1.5,
     },
     "B": {
@@ -77,7 +77,7 @@ STRATS = {
         "signal": "lower_break",
         "direction": "long",
         "btc_filter": "none",
-        "sl": 0.05, "tp": 0.15, "hold_days": 14,
+        "sl": 0.05, "tp": 0.15, "hold_days": 30,
         "r2_thresh": 0.5, "vol_mult": 1.0,
     },
     "C": {
@@ -85,7 +85,7 @@ STRATS = {
         "signal": "upper_touch",
         "direction": "short",
         "btc_filter": "bear",
-        "sl": 0.10, "tp": 0.20, "hold_days": 10,
+        "sl": 0.15, "tp": 0.15, "hold_days": 10,
         "r2_thresh": 0.3, "vol_mult": 1.0,
     },
 }
